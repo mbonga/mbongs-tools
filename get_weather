@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+
+import ipinfo
+import time
+import os
+import json
+import subprocess
+
+cached_location = os.environ['HOME'] + "/.cache/ipinfo_location"
+cached_weather = os.environ['HOME'] + "/.cache/wttr_weather"
+
+access_token = os.environ['IPINFO_TOKEN']
+
+def cached(file_name: str, minutes: int = 1):
+    def decorator(function):
+        def wrapper(*args, **kwargs):
+            current_time = time.time()
+            cached = False
+            if os.path.isfile(file_name) and (current_time < os.path.getctime(file_name) + minutes * 60):
+                try:
+                    with open(file_name,'r') as f:
+                        ret = json.load(f)
+                        cached = True
+                except (KeyError, json.JSONDecodeError):
+                    pass
+            if not cached:
+                with open(file_name, 'w') as f:
+                    ret = function(*args, **kwargs)
+                    json.dump(ret, f)
+            return ret
+        return wrapper
+    return decorator
+
+def clear_cache() -> None:
+    os.remove(cached_location)
+    os.remove(cached_weather)
+
+@cached(cached_location, 60)
+def get_ipinfo_by_ip(ip="") -> dict:
+    handler = ipinfo.getHandler(access_token)
+    details = handler.getDetails(ip)
+    details.details['cached_at'] = time.time()
+    return details.details
+
+def detect_location_by_ip(city: str, org: str) -> str:
+    if org.find("Rostelecom") > 0 and city == "Moscow":
+        return "Зеленоград" # Just because
+    if org.find("MY.GAMES") > 0 and city == "Amsterdam":
+        return "Москва" # Just because
+    if org.find("Rial Com") > 0 and city == "Serpukhov":
+        return "Протвино" # Just because
+    return "Unknown"
+
+@cached(cached_weather, 15)
+def get_weather_status(city: str) -> str:
+    wttr_command = ["curl", f"wttr.in/{city}?M&format=%m%20%l%20%c%t%20%w"]
+    ret = ""
+    try:
+        curl = subprocess.run(wttr_command, capture_output=True, text=True, timeout=5)
+        ret = curl.stdout
+    except subprocess.TimeoutExpired:
+        pass
+    return ret
+
+def main() -> None:
+    ip_details = get_ipinfo_by_ip()
+    city = detect_location_by_ip(ip_details['city'], ip_details['org'])
+    print(get_weather_status(city))
+
+if __name__ == "__main__":
+    main()
